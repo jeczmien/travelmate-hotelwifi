@@ -18,7 +18,7 @@ define Package/travelmate-hotelwifi
   CATEGORY:=Network
   TITLE:=Hotel Wi-Fi Travelmate panel
   URL:=https://github.com/jeczmien/travelmate-hotelwifi
-  DEPENDS:=+travelmate +rpcd +rpcd-mod-ucode +ucode +ucode-mod-fs +ucode-mod-ubus +ucode-mod-uci +uhttpd +uhttpd-mod-ubus +wireguard-tools
+  DEPENDS:=+travelmate +rpcd +rpcd-mod-ucode +ucode +ucode-mod-fs +ucode-mod-ubus +ucode-mod-uci +uhttpd +uhttpd-mod-ubus
 endef
 
 define Package/travelmate-hotelwifi/description

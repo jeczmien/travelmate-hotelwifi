@@ -1,6 +1,6 @@
 'use strict';
 
-import { open, popen } from 'fs';
+import { open } from 'fs';
 import { cursor } from 'uci';
 import { connect, error } from 'ubus';
 
@@ -264,13 +264,14 @@ return {
                 const u = cursor();
                 const travelmate = [];
                 const uplinks = [];
+                const iface = u.get('travelmate', 'global', 'trm_iface') ?? 'trm_wwan';
 
                 u.foreach('travelmate', 'uplink', (s) => {
                     push(travelmate, s);
                 });
 
                 u.foreach('wireless', 'wifi-iface', (w) => {
-                    if (w.mode != 'sta' || w.network != 'trm_wwan')
+                    if (w.mode != 'sta' || w.network != iface)
                         return;
 
                     let enabled = false;
@@ -308,68 +309,49 @@ return {
         status: {
             call: function() {
                 let wifiConnected = false;
-                let latestHandshake = 0;
                 let stationId = '';
+                let vpnIface = '';
 
-                const runtimeText = readText(
-                    '/var/run/travelmate/travelmate.runtime.json'
-                );
+                const runtimeText = readText('/var/run/travelmate/travelmate.runtime.json');
 
                 if (runtimeText) {
                     try {
-                        const runtime = json(runtimeText);
-                        const value = runtime?.data?.travelmate_status ?? '';
-                        stationId = runtime?.data?.station_id ?? '';
+                        const data = json(runtimeText)?.data ?? {};
+                        const value = data.travelmate_status ?? '';
+                        const interfaces = split(data.station_interfaces ?? '', ',');
 
-                        wifiConnected =
-                            substr(value, 0, 9) == 'connected';
+                        stationId = data.station_id ?? '';
+                        wifiConnected = substr(value, 0, 9) == 'connected';
+
+                        if (length(interfaces) > 1)
+                            vpnIface = trim(interfaces[1]);
                     }
                     catch (e) {
                     }
                 }
 
-                const wg = popen(
-                    'wg show wg0 latest-handshakes 2>/dev/null'
-                );
-
-                if (wg) {
-                    const output = trim(wg.read('all') ?? '');
-                    wg.close();
-
-                    if (output) {
-                        const lines = split(output, '\n');
-
-                        for (let i = 0; i < length(lines); i++) {
-                            const fields = split(trim(lines[i]), '\t');
-                            const value =
-                                int(fields[length(fields) - 1]);
-
-                            if (value > latestHandshake)
-                                latestHandshake = value;
-                        }
-                    }
-                }
-
-                const handshakeAge =
-                    latestHandshake > 0
-                        ? time() - latestHandshake
-                        : null;
-
-                const vpnConnected =
-                    handshakeAge != null &&
-                    handshakeAge >= 0 &&
-                    handshakeAge <= 180;
-
+                let vpnConnected = false;
                 let internetOk = false;
 
-                if (vpnConnected)
-                    internetOk = system('ping -I wg0 -c 1 -W 3 1.1.1.1 >/dev/null 2>&1') == 0;
+                if (vpnIface && vpnIface != '-') {
+                    const bus = connect();
+                    const status = bus
+                        ? bus.call(sprintf('network.interface.%s', vpnIface), 'status', {})
+                        : null;
+
+                    vpnConnected = status?.up == true;
+
+                    const device = status?.device ?? vpnIface;
+
+                    if (vpnConnected && match(device, /^[A-Za-z0-9_.:-]+$/))
+                        internetOk = system(sprintf('ping -I %s -c 1 -W 3 1.1.1.1 >/dev/null 2>&1', device)) == 0;
+                }
+
                 return {
                     wifiConnected,
                     stationId,
                     vpnConnected,
-                    internetOk,
-                    handshakeAge
+                    internetOk
                 };
             }
         },

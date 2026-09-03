@@ -12,10 +12,10 @@ It is served directly by uhttpd at `/hotelwifi/`.
 - Change saved Wi-Fi passwords.
 - Remove remembered uplinks.
 - Change uplink priority with up/down controls.
-- Show current Wi-Fi, WireGuard and Internet status.
+- Show current Wi-Fi, VPN and Internet status.
 - Use a dedicated restricted rpcd login instead of exposing full LuCI access.
 - Mobile-first interface with light/dark mode.
-- English default UI plus the current LuCI language catalogue.
+- Browser-language detection with English fallback plus the current LuCI language catalogue.
 - RTL layout support for Arabic, Persian and Hebrew.
 
 ## Tested environment
@@ -26,7 +26,7 @@ The 0.1.0 release was tested on:
 - Travelmate 2.4.8-r1
 - rpcd with ucode support
 - uhttpd with the ubus module
-- WireGuard interface `wg0`
+- Travelmate-managed WireGuard (`wg0`) as the tested VPN setup
 
 ## Current assumptions
 
@@ -35,8 +35,6 @@ It currently assumes:
 
 - two wireless devices named `radio0` and `radio1`;
 - `radio0` is displayed as 2.4 GHz and `radio1` as 5 GHz;
-- WireGuard status is read from interface `wg0`;
-- Internet reachability is checked with ICMP to `1.1.1.1` through `wg0`;
 - the Travelmate uplink interface is normally `trm_wwan` (write operations use
   `travelmate.global.trm_iface` where available).
 
@@ -56,7 +54,6 @@ The OpenWrt package declares dependencies on:
 - `ucode-mod-uci`
 - `uhttpd`
 - `uhttpd-mod-ubus`
-- `wireguard-tools`
 
 `uhttpd-mod-ubus` enables the `/ubus` HTTP JSON-RPC endpoint used by the
 frontend.
@@ -114,7 +111,7 @@ The package is architecture-independent (`PKGARCH:=all`).
 
 ## Languages
 
-English is the default language. The selector follows the current LuCI language
+The initial language follows browser preferences and falls back to English. The selector follows the current LuCI language
 catalogue and uses the same language codes/aliases where applicable. Missing
 strings in a translation automatically fall back to English.
 
