@@ -1,0 +1,18 @@
+Hotel Wi-Fi
+
+Copyright (C) 2026 Hotel Wi-Fi contributors
+
+This project integrates with OpenWrt Travelmate and uses conventions derived from
+OpenWrt/LuCI and Travelmate interfaces.
+
+Travelmate:
+  Copyright (c) 2016-2026 Dirk Brenken
+  License: GPL-3.0-or-later
+  https://github.com/openwrt/packages/tree/master/net/travelmate
+
+LuCI:
+  Copyright the LuCI contributors
+  License: Apache-2.0
+  https://github.com/openwrt/luci
+
+Hotel Wi-Fi is distributed under GPL-3.0-or-later.

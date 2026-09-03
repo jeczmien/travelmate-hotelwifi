@@ -1,0 +1,27 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+echo running > /tmp/hotelwifi.scan.status
+rm -f /tmp/hotelwifi.radio1 /tmp/hotelwifi.radio0
+
+/etc/init.d/travelmate scan radio1 >/dev/null 2>&1 || {
+    echo error-radio1 > /tmp/hotelwifi.scan.status
+    exit 1
+}
+
+cp /var/run/travelmate/travelmate.scan /tmp/hotelwifi.radio1 || {
+    echo error-radio1-copy > /tmp/hotelwifi.scan.status
+    exit 2
+}
+
+/etc/init.d/travelmate scan radio0 >/dev/null 2>&1 || {
+    echo error-radio0 > /tmp/hotelwifi.scan.status
+    exit 3
+}
+
+cp /var/run/travelmate/travelmate.scan /tmp/hotelwifi.radio0 || {
+    echo error-radio0-copy > /tmp/hotelwifi.scan.status
+    exit 4
+}
+
+echo done > /tmp/hotelwifi.scan.status

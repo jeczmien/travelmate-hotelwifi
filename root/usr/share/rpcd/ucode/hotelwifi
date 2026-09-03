@@ -1,0 +1,1034 @@
+'use strict';
+
+import { open, popen } from 'fs';
+import { cursor } from 'uci';
+import { connect, error } from 'ubus';
+
+
+function readText(path) {
+    const f = open(path, 'r');
+
+    if (!f)
+        return null;
+
+    const value = f.read('all');
+    f.close();
+
+    return trim(value ?? '');
+}
+
+
+function contains(value, needle) {
+    return index(value ?? '', needle) >= 0;
+}
+
+
+function resolveCipher(cipherRaw) {
+    const cipherMap = {
+        '2':  { name: 'TKIP', aes: false },
+        '4':  { name: 'CCMP', aes: true },
+        '6':  { name: 'BIP', aes: false },
+        '8':  { name: 'GCMP', aes: true },
+        '9':  { name: 'GCMP-256', aes: true },
+        '10': { name: 'CCMP-256', aes: true },
+        '11': { name: 'BIP-GMAC-128', aes: false },
+        '12': { name: 'BIP-GMAC-256', aes: false },
+        '13': { name: 'BIP-CMAC-256', aes: false }
+    };
+
+    if (!cipherRaw)
+        return { name: 'unknown', aes: false };
+
+    if (contains(cipherRaw, ':')) {
+        const parts = split(cipherRaw, ':');
+        const id = parts[length(parts) - 1];
+
+        if (cipherMap[id])
+            return cipherMap[id];
+
+        return {
+            name: sprintf('unknown (%s)', cipherRaw),
+            aes: false
+        };
+    }
+
+    for (let id in cipherMap) {
+        if (cipherMap[id].name == cipherRaw)
+            return cipherMap[id];
+    }
+
+    return {
+        name: cipherRaw,
+        aes: false
+    };
+}
+
+
+function resolveEncryption(wpa, cipher, auth) {
+    const hasWPA1 = contains(wpa, 'WPA1');
+    const hasWPA2 = contains(wpa, 'WPA2');
+    const hasWPA3 = contains(wpa, 'WPA3');
+    const hasPSK = contains(auth, 'PSK');
+    const hasSAE = contains(auth, 'SAE');
+    const has8021x = contains(auth, '802.1X');
+    const hasOWE = contains(auth, 'OWE');
+    const hasSuiteB = contains(auth, 'SUITE-B');
+    const resolved = resolveCipher(cipher);
+
+    if (cipher == '-' && wpa == '-')
+        return { code: 'none', label: 'Open' };
+
+    if (hasOWE)
+        return { code: 'owe', label: sprintf('WPA3 OWE (%s)', resolved.name) };
+
+    if (hasSuiteB)
+        return { code: 'wpa3', label: sprintf('WPA3 Enterprise (%s)', resolved.name) };
+
+    if (hasWPA2 && hasWPA3 && hasPSK && !has8021x)
+        return { code: 'sae-mixed', label: sprintf('Mixed WPA2/WPA3 PSK (%s)', resolved.name) };
+
+    if (hasWPA2 && hasWPA3 && has8021x)
+        return { code: 'wpa3-mixed', label: sprintf('Mixed WPA2/WPA3 802.1X (%s)', resolved.name) };
+
+    if (hasWPA3 && hasSAE && !has8021x)
+        return { code: 'sae', label: 'WPA3 PSK (SAE)' };
+
+    if (hasWPA3 && has8021x)
+        return { code: 'wpa3', label: sprintf('WPA3 802.1X (%s)', resolved.name) };
+
+    if (hasWPA1 && hasWPA2 && has8021x)
+        return {
+            code: resolved.aes ? 'wpa-mixed+ccmp' : 'wpa-mixed+tkip',
+            label: sprintf('Mixed WPA/WPA2 802.1X (%s)', resolved.name)
+        };
+
+    if (hasWPA2 && has8021x)
+        return {
+            code: resolved.aes ? 'wpa2+ccmp' : 'wpa2+tkip',
+            label: sprintf('WPA2 802.1X (%s)', resolved.name)
+        };
+
+    if (hasWPA1 && has8021x)
+        return {
+            code: resolved.aes ? 'wpa+ccmp' : 'wpa+tkip',
+            label: sprintf('WPA 802.1X (%s)', resolved.name)
+        };
+
+    if (hasWPA1 && hasWPA2 && hasPSK)
+        return {
+            code: resolved.aes ? 'psk-mixed+ccmp' : 'psk-mixed+tkip',
+            label: sprintf('Mixed WPA/WPA2 PSK (%s)', resolved.name)
+        };
+
+    if (hasWPA2 && hasPSK)
+        return {
+            code: resolved.aes ? 'psk2+ccmp' : 'psk2+tkip',
+            label: sprintf('WPA2 PSK (%s)', resolved.name)
+        };
+
+    if (hasWPA1 && hasPSK)
+        return {
+            code: resolved.aes ? 'psk+ccmp' : 'psk+tkip',
+            label: sprintf('WPA PSK (%s)', resolved.name)
+        };
+
+    return {
+        code: 'none',
+        label: 'unknown'
+    };
+}
+
+
+function parseScan(path, radio, band) {
+    const content = readText(path);
+    const networks = [];
+
+    if (!content)
+        return networks;
+
+    const lines = split(content, '\n');
+
+    for (let i = 0; i < length(lines); i++) {
+        const line = lines[i];
+
+        if (!match(line, /^[ \t]*[0-9]+/))
+            continue;
+
+        const strength = int(trim(substr(line, 0, 3)));
+        const channel = int(trim(substr(line, 3, 4)));
+        const bssid = trim(substr(line, 7, 18));
+        const wpa = trim(substr(line, 25, 12));
+        const cipher = trim(substr(line, 37, 11));
+        const auth = trim(substr(line, 48, 11));
+
+        let ssid = trim(substr(line, 59));
+
+        if (
+            length(ssid) >= 2 &&
+            substr(ssid, 0, 1) == '"' &&
+            substr(ssid, -1) == '"'
+        )
+            ssid = substr(ssid, 1, -1);
+
+        if (!length(ssid))
+            continue;
+
+        const encryption = resolveEncryption(wpa, cipher, auth);
+
+        push(networks, {
+            radio,
+            band,
+            strength,
+            channel,
+            bssid,
+            ssid,
+            encryption: encryption.code,
+            encryptionLabel: encryption.label,
+            hidden: ssid == 'hidden'
+        });
+    }
+
+    return networks;
+}
+
+
+
+function isValidWpaKey(value) {
+    const len = length(value ?? '');
+
+    if (len == 64)
+        return !!match(value, /^[a-fA-F0-9]{64}$/);
+
+    return len >= 8 && len <= 63;
+}
+
+
+function findScannedNetwork(radio, bssid) {
+    let path;
+    let band;
+
+    if (radio == 'radio1') {
+        path = '/tmp/hotelwifi.radio1';
+        band = '5 GHz';
+    }
+    else if (radio == 'radio0') {
+        path = '/tmp/hotelwifi.radio0';
+        band = '2.4 GHz';
+    }
+    else {
+        return null;
+    }
+
+    const networks = parseScan(path, radio, band);
+
+    for (let i = 0; i < length(networks); i++) {
+        if (networks[i].bssid == bssid)
+            return networks[i];
+    }
+
+    return null;
+}
+
+return {
+    'hotelwifi': {
+        ping: {
+            call: function() {
+                return {
+                    ok: true
+                };
+            }
+        },
+
+        scanStart: {
+            call: function() {
+                system('/usr/libexec/hotelwifi-scan >/dev/null 2>&1 &');
+
+                return {
+                    started: true
+                };
+            }
+        },
+
+        scanStatus: {
+            call: function() {
+                const status = readText('/tmp/hotelwifi.scan.status');
+
+                return {
+                    status: status || 'idle'
+                };
+            }
+        },
+
+        list: {
+            call: function() {
+                const u = cursor();
+                const travelmate = [];
+                const uplinks = [];
+
+                u.foreach('travelmate', 'uplink', (s) => {
+                    push(travelmate, s);
+                });
+
+                u.foreach('wireless', 'wifi-iface', (w) => {
+                    if (w.mode != 'sta' || w.network != 'trm_wwan')
+                        return;
+
+                    let enabled = false;
+
+                    for (let i = 0; i < length(travelmate); i++) {
+                        const t = travelmate[i];
+
+                        if (
+                            t.device == w.device &&
+                            t.ssid == w.ssid &&
+                            (t.bssid ?? '') == (w.bssid ?? '')
+                        ) {
+                            enabled = t.enabled == '1';
+                            break;
+                        }
+                    }
+
+                    push(uplinks, {
+                        id: w['.name'],
+                        radio: w.device,
+                        band: w.device == 'radio1' ? '5 GHz' : '2.4 GHz',
+                        ssid: w.ssid,
+                        bssid: w.bssid ?? null,
+                        encryption: w.encryption,
+                        enabled
+                    });
+                });
+
+                return {
+                    uplinks
+                };
+            }
+        },
+
+        status: {
+            call: function() {
+                let wifiConnected = false;
+                let latestHandshake = 0;
+                let stationId = '';
+
+                const runtimeText = readText(
+                    '/var/run/travelmate/travelmate.runtime.json'
+                );
+
+                if (runtimeText) {
+                    try {
+                        const runtime = json(runtimeText);
+                        const value = runtime?.data?.travelmate_status ?? '';
+                        stationId = runtime?.data?.station_id ?? '';
+
+                        wifiConnected =
+                            substr(value, 0, 9) == 'connected';
+                    }
+                    catch (e) {
+                    }
+                }
+
+                const wg = popen(
+                    'wg show wg0 latest-handshakes 2>/dev/null'
+                );
+
+                if (wg) {
+                    const output = trim(wg.read('all') ?? '');
+                    wg.close();
+
+                    if (output) {
+                        const lines = split(output, '\n');
+
+                        for (let i = 0; i < length(lines); i++) {
+                            const fields = split(trim(lines[i]), '\t');
+                            const value =
+                                int(fields[length(fields) - 1]);
+
+                            if (value > latestHandshake)
+                                latestHandshake = value;
+                        }
+                    }
+                }
+
+                const handshakeAge =
+                    latestHandshake > 0
+                        ? time() - latestHandshake
+                        : null;
+
+                const vpnConnected =
+                    handshakeAge != null &&
+                    handshakeAge >= 0 &&
+                    handshakeAge <= 180;
+
+                let internetOk = false;
+
+                if (vpnConnected)
+                    internetOk = system('ping -I wg0 -c 1 -W 3 1.1.1.1 >/dev/null 2>&1') == 0;
+                return {
+                    wifiConnected,
+                    stationId,
+                    vpnConnected,
+                    internetOk,
+                    handshakeAge
+                };
+            }
+        },
+
+        'connect': {
+            args: {
+                radio: 'radio1',
+                bssid: '00:00:00:00:00:00',
+                password: ''
+            },
+
+            call: function(request) {
+                const radio = request.args.radio;
+                const bssid = request.args.bssid;
+                const password = request.args.password ?? '';
+
+                if (radio != 'radio0' && radio != 'radio1')
+                    return { ok: false, error: 'invalid_radio' };
+
+                if (!match(bssid ?? '', /^[a-fA-F0-9]{2}(:[a-fA-F0-9]{2}){5}$/))
+                    return { ok: false, error: 'invalid_bssid' };
+
+                if (readText('/tmp/hotelwifi.scan.status') != 'done')
+                    return { ok: false, error: 'scan_not_ready' };
+
+                const network = findScannedNetwork(radio, bssid);
+
+                if (!network)
+                    return { ok: false, error: 'network_not_found_in_scan' };
+
+                if (network.hidden)
+                    return { ok: false, error: 'hidden_network_unsupported' };
+
+                const encryption = network.encryption;
+                const needsPassword =
+                    contains(encryption, 'psk') ||
+                    contains(encryption, 'sae');
+
+                const passwordless =
+                    encryption == 'none' ||
+                    encryption == 'owe';
+
+                if (!needsPassword && !passwordless)
+                    return { ok: false, error: 'enterprise_network_unsupported' };
+
+                if (needsPassword && !isValidWpaKey(password))
+                    return { ok: false, error: 'invalid_password' };
+
+                const u = cursor();
+                const iface =
+                    u.get('travelmate', 'global', 'trm_iface') ??
+                    'trm_wwan';
+
+                let duplicate = false;
+                let count = 0;
+
+                u.foreach('wireless', 'wifi-iface', (w) => {
+                    count++;
+
+                    if (
+                        w.device == radio &&
+                        w.ssid == network.ssid
+                    )
+                        duplicate = true;
+                });
+
+                if (duplicate)
+                    return {
+                        ok: false,
+                        error: 'duplicate',
+                        ssid: network.ssid,
+                        radio
+                    };
+
+                let sid = null;
+
+                while (!sid) {
+                    count++;
+
+                    const candidate =
+                        sprintf('trm_uplink%d', count);
+
+                    if (!u.get('wireless', candidate))
+                        sid = candidate;
+                }
+
+                const bus = connect();
+
+                if (!bus)
+                    return { ok: false, error: 'ubus_unavailable' };
+
+                if (!u.set('wireless', sid, 'wifi-iface'))
+                    return { ok: false, error: 'wireless_create_failed' };
+
+                u.set('wireless', sid, 'device', radio);
+                u.set('wireless', sid, 'mode', 'sta');
+                u.set('wireless', sid, 'network', iface);
+                u.set('wireless', sid, 'ssid', network.ssid);
+                u.set('wireless', sid, 'encryption', encryption);
+
+                if (needsPassword)
+                    u.set('wireless', sid, 'key', password);
+
+                u.set('wireless', sid, 'disabled', '1');
+
+                const tid = u.add('travelmate', 'uplink');
+
+                if (!tid)
+                    return { ok: false, error: 'travelmate_create_failed' };
+
+                u.set('travelmate', tid, 'enabled', '1');
+                u.set('travelmate', tid, 'device', radio);
+                u.set('travelmate', tid, 'ssid', network.ssid);
+
+                const vpnStdService =
+                    u.get('travelmate', 'global', 'trm_stdvpnservice');
+
+                const vpnStdIface =
+                    u.get('travelmate', 'global', 'trm_stdvpniface');
+
+                if (vpnStdService && vpnStdIface) {
+                    u.set('travelmate', tid, 'vpn', '1');
+                    u.set('travelmate', tid, 'vpnservice', vpnStdService);
+                    u.set('travelmate', tid, 'vpniface', vpnStdIface);
+                }
+
+                if (!u.commit('wireless'))
+                    return { ok: false, error: 'wireless_commit_failed' };
+
+                if (!u.commit('travelmate'))
+                    return { ok: false, error: 'travelmate_commit_failed' };
+
+                bus.call(
+                    'service',
+                    'event',
+                    {
+                        type: 'config.change',
+                        data: {
+                            package: 'wireless'
+                        }
+                    }
+                );
+
+                const wirelessEventError = error();
+
+                bus.call(
+                    'service',
+                    'event',
+                    {
+                        type: 'config.change',
+                        data: {
+                            package: 'travelmate'
+                        }
+                    }
+                );
+
+                const travelmateEventError = error();
+
+                return {
+                    ok: true,
+                    id: sid,
+                    radio,
+                    band: network.band,
+                    ssid: network.ssid,
+                    encryption,
+                    reloadTriggered:
+                        wirelessEventError == null &&
+                        travelmateEventError == null
+                };
+            }
+        },
+
+        update: {
+            args: {
+                id: 'trm_uplink1',
+                action: 'enable',
+                password: ''
+            },
+
+            call: function(request) {
+                const id = request.args.id ?? '';
+                const action = request.args.action ?? '';
+                const password = request.args.password ?? '';
+
+                if (!match(id, /^trm_uplink[0-9]+$/))
+                    return { ok: false, error: 'invalid_id' };
+
+                const u = cursor();
+                const iface =
+                    u.get('travelmate', 'global', 'trm_iface') ??
+                    'trm_wwan';
+
+                const w = u.get_all('wireless', id);
+
+                if (
+                    !w ||
+                    w['.type'] != 'wifi-iface' ||
+                    w.mode != 'sta' ||
+                    w.network != iface
+                )
+                    return { ok: false, error: 'uplink_not_found' };
+
+                let tid = null;
+
+                u.foreach('travelmate', 'uplink', (t) => {
+                    if (
+                        !tid &&
+                        t.device == w.device &&
+                        t.ssid == w.ssid &&
+                        (t.bssid ?? '') == (w.bssid ?? '')
+                    )
+                        tid = t['.name'];
+                });
+
+                if (!tid)
+                    return { ok: false, error: 'travelmate_uplink_not_found' };
+
+                const bus = connect();
+
+                if (!bus)
+                    return { ok: false, error: 'ubus_unavailable' };
+
+                if (action == 'enable' || action == 'disable') {
+                    const enabled =
+                        action == 'enable' ? '1' : '0';
+
+                    if (u.get('travelmate', tid, 'enabled') == enabled)
+                        return { ok: true, changed: false };
+
+                    u.set(
+                        'travelmate',
+                        tid,
+                        'enabled',
+                        enabled
+                    );
+
+                    if (!u.commit('travelmate'))
+                        return {
+                            ok: false,
+                            error: 'travelmate_commit_failed'
+                        };
+
+                    bus.call(
+                        'service',
+                        'event',
+                        {
+                            type: 'config.change',
+                            data: {
+                                package: 'travelmate'
+                            }
+                        }
+                    );
+
+                    return {
+                        ok: true,
+                        changed: true,
+                        enabled: enabled == '1'
+                    };
+                }
+
+                if (action == 'password') {
+                    const encryption = w.encryption ?? '';
+
+                    const supportsPassword =
+                        contains(encryption, 'psk') ||
+                        contains(encryption, 'sae');
+
+                    if (!supportsPassword)
+                        return {
+                            ok: false,
+                            error: 'password_not_applicable'
+                        };
+
+                    if (!isValidWpaKey(password))
+                        return {
+                            ok: false,
+                            error: 'invalid_password'
+                        };
+
+                    u.set(
+                        'wireless',
+                        id,
+                        'key',
+                        password
+                    );
+
+                    if (!u.commit('wireless'))
+                        return {
+                            ok: false,
+                            error: 'wireless_commit_failed'
+                        };
+
+                    bus.call(
+                        'service',
+                        'event',
+                        {
+                            type: 'config.change',
+                            data: {
+                                package: 'wireless'
+                            }
+                        }
+                    );
+
+                    return {
+                        ok: true,
+                        changed: true
+                    };
+                }
+
+                return {
+                    ok: false,
+                    error: 'invalid_action'
+                };
+            }
+        },
+
+        remove: {
+            args: {
+                id: 'trm_uplink1'
+            },
+
+            call: function(request) {
+                const id = request.args.id ?? '';
+
+                if (!match(id, /^trm_uplink[0-9]+$/))
+                    return { ok: false, error: 'invalid_id' };
+
+                const u = cursor();
+                const iface =
+                    u.get('travelmate', 'global', 'trm_iface') ??
+                    'trm_wwan';
+
+                const w = u.get_all('wireless', id);
+
+                if (
+                    !w ||
+                    w['.type'] != 'wifi-iface' ||
+                    w.mode != 'sta' ||
+                    w.network != iface
+                )
+                    return { ok: false, error: 'uplink_not_found' };
+
+                const device = w.device;
+                const ssid = w.ssid;
+                const bssid = w.bssid ?? '';
+
+                if (!u.delete('wireless', id))
+                    return {
+                        ok: false,
+                        error: 'wireless_delete_failed'
+                    };
+
+                let stillReferenced = false;
+
+                u.foreach('wireless', 'wifi-iface', (other) => {
+                    if (
+                        other.mode == 'sta' &&
+                        other.network == iface &&
+                        other.device == device &&
+                        other.ssid == ssid &&
+                        (other.bssid ?? '') == bssid
+                    )
+                        stillReferenced = true;
+                });
+
+                const tids = [];
+                let openCountToRemove = 0;
+
+                if (!stillReferenced) {
+                    u.foreach('travelmate', 'uplink', (t) => {
+                        if (
+                            t.device == device &&
+                            t.ssid == ssid &&
+                            (t.bssid ?? '') == bssid
+                        ) {
+                            push(tids, t['.name']);
+
+                            if (int(t.opensta ?? '0') == 1)
+                                openCountToRemove++;
+                        }
+                    });
+                }
+
+                for (let i = 0; i < length(tids); i++)
+                    u.delete('travelmate', tids[i]);
+
+                if (openCountToRemove > 0) {
+                    let count = int(
+                        u.get(
+                            'travelmate',
+                            'global',
+                            'trm_autoaddcnt'
+                        ) ?? '0'
+                    );
+
+                    count -= openCountToRemove;
+
+                    if (count < 0)
+                        count = 0;
+
+                    u.set(
+                        'travelmate',
+                        'global',
+                        'trm_autoaddcnt',
+                        sprintf('%d', count)
+                    );
+                }
+
+                if (!u.commit('wireless'))
+                    return {
+                        ok: false,
+                        error: 'wireless_commit_failed'
+                    };
+
+                const travelmateChanged =
+                    length(tids) > 0 ||
+                    openCountToRemove > 0;
+
+                if (
+                    travelmateChanged &&
+                    !u.commit('travelmate')
+                )
+                    return {
+                        ok: false,
+                        error: 'travelmate_commit_failed'
+                    };
+
+                const bus = connect();
+
+                if (!bus)
+                    return {
+                        ok: false,
+                        error: 'ubus_unavailable'
+                    };
+
+                bus.call(
+                    'service',
+                    'event',
+                    {
+                        type: 'config.change',
+                        data: {
+                            package: 'wireless'
+                        }
+                    }
+                );
+
+                if (travelmateChanged) {
+                    bus.call(
+                        'service',
+                        'event',
+                        {
+                            type: 'config.change',
+                            data: {
+                                package: 'travelmate'
+                            }
+                        }
+                    );
+                }
+
+                return {
+                    ok: true
+                };
+            }
+        },
+
+        move: {
+            args: {
+                id: 'trm_uplink1',
+                direction: 'up'
+            },
+
+            call: function(request) {
+                const id = request.args.id ?? '';
+                const direction = request.args.direction ?? '';
+
+                if (!match(id, /^trm_uplink[0-9]+$/))
+                    return {
+                        ok: false,
+                        error: 'invalid_id'
+                    };
+
+                if (
+                    direction != 'up' &&
+                    direction != 'down'
+                )
+                    return {
+                        ok: false,
+                        error: 'invalid_direction'
+                    };
+
+                const u = cursor();
+
+                const iface =
+                    u.get(
+                        'travelmate',
+                        'global',
+                        'trm_iface'
+                    ) ?? 'trm_wwan';
+
+                const current =
+                    u.get_all('wireless', id);
+
+                if (
+                    !current ||
+                    current['.type'] != 'wifi-iface' ||
+                    current.mode != 'sta' ||
+                    current.network != iface
+                )
+                    return {
+                        ok: false,
+                        error: 'uplink_not_found'
+                    };
+
+                const radio = current.device;
+                const uplinks = [];
+
+                u.foreach(
+                    'wireless',
+                    'wifi-iface',
+                    (section) => {
+                        if (
+                            section.mode == 'sta' &&
+                            section.network == iface &&
+                            section.device == radio &&
+                            match(
+                                section['.name'],
+                                /^trm_uplink[0-9]+$/
+                            )
+                        ) {
+                            push(uplinks, section);
+                        }
+                    }
+                );
+
+                let currentPosition = -1;
+
+                for (
+                    let i = 0;
+                    i < length(uplinks);
+                    i++
+                ) {
+                    if (uplinks[i]['.name'] == id) {
+                        currentPosition = i;
+                        break;
+                    }
+                }
+
+                if (currentPosition < 0)
+                    return {
+                        ok: false,
+                        error: 'uplink_not_found'
+                    };
+
+                const targetPosition =
+                    direction == 'up'
+                        ? currentPosition - 1
+                        : currentPosition + 1;
+
+                if (
+                    targetPosition < 0 ||
+                    targetPosition >= length(uplinks)
+                )
+                    return {
+                        ok: true,
+                        changed: false
+                    };
+
+                const targetIndex =
+                    uplinks[targetPosition]['.index'];
+
+                if (
+                    u.reorder(
+                        'wireless',
+                        id,
+                        targetIndex
+                    ) !== true
+                )
+                    return {
+                        ok: false,
+                        error: 'reorder_failed'
+                    };
+
+                if (!u.commit('wireless'))
+                    return {
+                        ok: false,
+                        error: 'wireless_commit_failed'
+                    };
+
+                const bus = connect();
+
+                if (!bus)
+                    return {
+                        ok: false,
+                        error: 'ubus_unavailable'
+                    };
+
+                bus.call(
+                    'service',
+                    'event',
+                    {
+                        type: 'config.change',
+                        data: {
+                            package: 'wireless'
+                        }
+                    }
+                );
+
+                bus.call(
+                    'service',
+                    'event',
+                    {
+                        type: 'config.change',
+                        data: {
+                            package: 'travelmate'
+                        }
+                    }
+                );
+
+                return {
+                    ok: true,
+                    changed: true
+                };
+            }
+        },
+
+        scanResults: {
+            call: function() {
+                const status = readText('/tmp/hotelwifi.scan.status') || 'idle';
+                const networks = [];
+
+                if (status != 'done')
+                    return {
+                        status,
+                        networks
+                    };
+
+                const radio1 = parseScan(
+                    '/tmp/hotelwifi.radio1',
+                    'radio1',
+                    '5 GHz'
+                );
+
+                const radio0 = parseScan(
+                    '/tmp/hotelwifi.radio0',
+                    'radio0',
+                    '2.4 GHz'
+                );
+
+                for (let i = 0; i < length(radio1); i++)
+                    push(networks, radio1[i]);
+
+                for (let i = 0; i < length(radio0); i++)
+                    push(networks, radio0[i]);
+
+                return {
+                    status,
+                    networks
+                };
+            }
+        }
+    }
+};

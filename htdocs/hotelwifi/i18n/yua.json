@@ -1,0 +1,15 @@
+{
+  "language.label": "T'aan",
+  "login.routerPassword": "Contraseña ti’ le routero",
+  "login.button": "Okol",
+  "uplinks.title": "Redes guardadas",
+  "uplink.password": "Contraseña",
+  "uplink.remove": "Jóok’s",
+  "scan.button": "Kax redes",
+  "connect.title": "Nup’",
+  "connect.password": "Contraseña",
+  "connect.button": "Nup’",
+  "common.cancel": "Cancelar",
+  "common.save": "Guardar",
+  "security.open": "Abierto"
+}

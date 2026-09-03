@@ -1,0 +1,20 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+uci -q batch <<'UCI'
+set rpcd.hotelwifi='login'
+set rpcd.hotelwifi.username='hotelwifi'
+set rpcd.hotelwifi.password='$p$root'
+
+delete rpcd.hotelwifi.read
+add_list rpcd.hotelwifi.read='hotelwifi'
+
+delete rpcd.hotelwifi.write
+add_list rpcd.hotelwifi.write='hotelwifi'
+
+commit rpcd
+UCI
+
+/etc/init.d/rpcd restart
+
+exit 0

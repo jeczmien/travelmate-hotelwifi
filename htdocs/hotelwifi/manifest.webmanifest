@@ -1,0 +1,9 @@
+{
+    "name": "Hotel Wi-Fi",
+    "short_name": "Hotel Wi-Fi",
+    "start_url": "/hotelwifi/",
+    "scope": "/hotelwifi/",
+    "display": "standalone",
+    "background_color": "#ffffff",
+    "theme_color": "#ffffff"
+}

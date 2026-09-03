@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta
+        name="viewport"
+        content="width=device-width,initial-scale=1,viewport-fit=cover"
+    >
+    <meta
+        name="theme-color"
+        content="#ffffff"
+    >
+    <title>Hotel Wi-Fi</title>
+
+    <link
+        rel="manifest"
+        href="manifest.webmanifest"
+    >
+
+    <link
+        rel="stylesheet"
+        href="app.css?v=0.1.0-r1"
+    >
+</head>
+
+<body>
+    <main>
+        <div class="app-header">
+            <h1>Hotel Wi-Fi</h1>
+
+            <select
+                id="languageSelect"
+                class="language-select"
+                data-i18n-aria-label="language.label"
+            >
+                <option value="en">English</option>
+            </select>
+        </div>
+
+        <section
+            id="loginPanel"
+            class="card"
+        >
+            <label
+                for="password"
+                data-i18n="login.routerPassword"
+            ></label>
+
+            <input
+                id="password"
+                type="password"
+                autocomplete="current-password"
+                enterkeyhint="go"
+            >
+
+            <button
+                id="loginButton"
+                data-i18n="login.button"
+            ></button>
+
+            <div
+                id="loginError"
+                class="error"
+            ></div>
+        </section>
+
+        <section
+            id="appPanel"
+            hidden
+        >
+            <section class="card status-card">
+                <div class="status-row">
+                    <span data-i18n="status.wifiConnected"></span>
+                    <span
+                        id="wifiStatus"
+                        class="status unknown"
+                    >...</span>
+                </div>
+
+                <div class="status-row">
+                    <span data-i18n="status.vpnConnected"></span>
+                    <span
+                        id="vpnStatus"
+                        class="status unknown"
+                    >...</span>
+                </div>
+
+                <div class="status-row">
+                    <span data-i18n="status.internetOk"></span>
+                    <span
+                        id="internetStatus"
+                        class="status unknown"
+                    >...</span>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2
+                    class="section-title"
+                    data-i18n="uplinks.title"
+                ></h2>
+
+                <div id="uplinkList"></div>
+            </section>
+
+            <button
+                id="scanButton"
+                class="primary"
+                data-i18n="scan.button"
+            ></button>
+
+            <div
+                id="scanInfo"
+                class="info"
+            ></div>
+
+            <section
+                id="networkList"
+                class="network-list"
+            ></section>
+        </section>
+    </main>
+
+    <script src="i18n.js?v=0.1.0-r1"></script>
+    <script src="app.js?v=0.1.0-r1"></script>
+    <script src="connect.js?v=0.1.0-r1"></script>
+    <script src="manage.js?v=0.1.0-r1"></script>
+</body>
+</html>

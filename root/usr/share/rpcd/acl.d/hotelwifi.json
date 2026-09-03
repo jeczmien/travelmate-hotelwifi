@@ -1,0 +1,27 @@
+{
+        "hotelwifi": {
+                "description": "Grant access to Hotel Wi-Fi panel",
+                "read": {
+                        "ubus": {
+                                "hotelwifi": [
+                                        "ping",
+                                        "scanStart",
+                                        "scanStatus",
+                                        "scanResults",
+                                        "list",
+                                        "status"
+                                ]
+                        }
+                },
+                "write": {
+                        "ubus": {
+                                "hotelwifi": [
+                                        "connect",
+                                        "update",
+                                        "remove",
+                                        "move"
+                                ]
+                        }
+                }
+        }
+}
