@@ -84,6 +84,7 @@
         }
     }
 
+    function browserLanguage() { for (const value of navigator.languages ?? [navigator.language]) { const normalized = String(value).replace(/_/g, "-").toLowerCase(); if (normalized === "zh-hk" || normalized === "zh-mo") return "zh_Hant"; if (normalized === "zh" || normalized === "zh-sg") return "zh_Hans"; const language = canonicalLanguage(value) ?? canonicalLanguage(normalized.split("-")[0]); if (language) return language; } return "en"; }
     function interpolate(text, values) {
         if (!values)
             return text;
@@ -192,7 +193,7 @@
     async function init() {
         populateLanguageSelect();
 
-        const language = storedLanguage() ?? 'en';
+        const language = storedLanguage() ?? browserLanguage();
 
         try {
             await loadLanguage(language);
