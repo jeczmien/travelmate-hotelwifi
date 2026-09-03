@@ -15,4 +15,4 @@ LuCI:
   License: Apache-2.0
   https://github.com/openwrt/luci
 
-Hotel Wi-Fi is distributed under GPL-3.0-or-later.
+Hotel Wi-Fi is distributed under Apache-2.0.

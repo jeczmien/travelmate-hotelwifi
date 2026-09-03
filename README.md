@@ -194,7 +194,7 @@ other router configuration are not removed.
 
 ## License
 
-GPL-3.0-or-later. See `LICENSE` and `NOTICE`.
+Apache-2.0. See `LICENSE` and `NOTICE`.
 
 ## Upstream submission note
 
