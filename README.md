@@ -193,8 +193,3 @@ other router configuration are not removed.
 
 Apache-2.0. See `LICENSE` and `NOTICE`.
 
-## Upstream submission note
-
-For submission to the official OpenWrt packages feed, add a public maintainer
-name/email and repository URL to the package metadata before opening the pull
-request. OpenWrt also requires signed-off commits for package submissions.
